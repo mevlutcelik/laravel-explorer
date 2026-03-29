@@ -1,7 +1,9 @@
 # Laravel Explorer 🚀
+<kbd>
+    <img src="https://github.com/mevlutcelik/laravel-explorer/blob/main/ss.png" width="100%" style="border:1px solid black;"/>
+</kbd>
 
-![SS](https://github.com/mevlutcelik/laravel-explorer/blob/main/ss.png)
-
+<br/><br/>
 [![Latest Version on Packagist](https://img.shields.io/packagist/v/mevlutcelik/laravel-explorer.svg?style=flat-square)](https://packagist.org/packages/mevlutcelik/laravel-explorer)
 [![Total Downloads](https://img.shields.io/packagist/dt/mevlutcelik/laravel-explorer.svg?style=flat-square)](https://packagist.org/packages/mevlutcelik/laravel-explorer)
 [![License](https://img.shields.io/packagist/l/mevlutcelik/laravel-explorer.svg?style=flat-square)](https://packagist.org/packages/mevlutcelik/laravel-explorer)
