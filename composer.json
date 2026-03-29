@@ -1,0 +1,22 @@
+{
+    "name": "mevlutcelik/laravel-explorer",
+    "description": "An advanced API route explorer and testing workspace for Laravel.",
+    "type": "library",
+    "require": {
+        "php": "^8.2",
+        "illuminate/support": "^12.0",
+        "illuminate/routing": "^12.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Mevlutcelik\\LaravelExplorer\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Mevlutcelik\\LaravelExplorer\\LaravelExplorerServiceProvider"
+            ]
+        }
+    }
+}
