@@ -17,7 +17,7 @@ class ExplorerController extends Controller
             $middleware = $route->gatherMiddleware();
             $params = [];
 
-            // 1. URL Path Parametrelerini Yakala (Örn: /api/users/{id})
+            // 1. URL Path Parametrelerini Yakala
             preg_match_all('/\{([^}]+)\}/', $route->uri(), $matches);
             foreach ($matches[1] as $match) {
                 $isOptional = str_ends_with($match, '?');
@@ -29,7 +29,7 @@ class ExplorerController extends Controller
             try {
                 $action = $route->getAction();
                 $reflection = null;
-                $extractedParams = []; // ['email' => true, 'password' => false] formatında tutacağız
+                $extractedParams = [];
 
                 if (isset($action['uses']) && is_string($action['uses']) && str_contains($action['uses'], '@')) {
                     list($class, $method) = explode('@', $action['uses']);
@@ -42,7 +42,7 @@ class ExplorerController extends Controller
 
                 if ($reflection) {
                     
-                    // --- A. FORM REQUEST DOSYALARINI OKU (Örn: LoginRequest) ---
+                    // --- A. FORM REQUEST DOSYALARINI OKU ---
                     foreach ($reflection->getParameters() as $param) {
                         $type = $param->getType();
                         if ($type && !$type->isBuiltin()) {
@@ -60,9 +60,8 @@ class ExplorerController extends Controller
                                             $rSource = file($rFile);
                                             $rBody = implode("", array_slice($rSource, $rStart, $rLen));
                                             
-                                            preg_match_all('/[\'"]([a-zA-Z0-9_\.]+)[\'"]\s*=>\s*([^,\]]+)/', $rBody, $rMatches);
+                                            preg_match_all('/[\'"]([a-zA-Z0-9_\.\-]+)[\'"]\s*=>\s*([^,\]]+)/', $rBody, $rMatches);
                                             foreach ($rMatches[1] as $idx => $key) {
-                                                // Eğer kuralda 'required' geçiyorsa true yap
                                                 $extractedParams[$key] = str_contains($rMatches[2][$idx], 'required');
                                             }
                                         }
@@ -82,35 +81,44 @@ class ExplorerController extends Controller
                         $source = file($file);
                         $methodBody = implode("", array_slice($source, $startLine, $length));
 
-                        // 1. Sadece validate() bloklarının içini ara (response json'lara takılmamak için)
+                        // 1. validate() blokları
                         if (preg_match_all('/validate\s*\(\s*\[(.*?)\]\s*\)/s', $methodBody, $valBlocks)) {
                             foreach ($valBlocks[1] as $block) {
-                                preg_match_all('/[\'"]([a-zA-Z0-9_\.]+)[\'"]\s*=>\s*([^,\]]+)/', $block, $valMatches);
+                                preg_match_all('/[\'"]([a-zA-Z0-9_\.\-]+)[\'"]\s*=>\s*([^,\]]+)/', $block, $valMatches);
                                 foreach ($valMatches[1] as $idx => $k) {
                                     $extractedParams[$k] = str_contains($valMatches[2][$idx], 'required');
                                 }
                             }
                         }
 
-                        // 2. ->only('email', 'password') => UI'da düzgün görünmesi için bunları Required varsayıyoruz
-                        if (preg_match_all('/->only\(\s*(.*?)\s*\)/s', $methodBody, $onlyBlocks)) {
-                            foreach ($onlyBlocks[1] as $block) {
-                                preg_match_all('/[\'"]([a-zA-Z0-9_]+)[\'"]/', $block, $onlyKeys);
-                                foreach (($onlyKeys[1] ?? []) as $k) {
-                                    if (!isset($extractedParams[$k])) $extractedParams[$k] = true;
+                        // 2. Array alabilen metodlar: ->only, ->except, ->has, ->filled vb.
+                        if (preg_match_all('/->(?:only|except|has|hasAny|filled|anyFilled|missing)\(\s*(.*?)\s*\)/s', $methodBody, $arrayBlocks)) {
+                            foreach ($arrayBlocks[0] as $idx => $fullMatch) {
+                                $isRequired = str_starts_with(trim($fullMatch), '->only');
+                                preg_match_all('/[\'"]([a-zA-Z0-9_\.\-]+)[\'"]/', $arrayBlocks[1][$idx], $keys);
+                                foreach (($keys[1] ?? []) as $k) {
+                                    if (!isset($extractedParams[$k])) {
+                                        $extractedParams[$k] = $isRequired;
+                                    }
                                 }
                             }
                         }
 
-                        // 3. Normal kullanımlar: ->input('email'), request('email')
-                        preg_match_all('/(?:->input|->get|request\()\s*\(\s*[\'"]([a-zA-Z0-9_]+)[\'"]/', $methodBody, $m1);
+                        // 3. Tekli getter'lar: ->input('email'), request('email') vb.
+                        preg_match_all('/(?:->input|->get|->query|->post|->boolean|->date|->string|->integer|->enum|request\()\s*\(\s*[\'"]([a-zA-Z0-9_\.\-]+)[\'"]/', $methodBody, $m1);
                         foreach (($m1[1] ?? []) as $k) {
                             if (!isset($extractedParams[$k])) $extractedParams[$k] = false;
                         }
                         
-                        // 4. Sihirli özellikler: $request->email
-                        preg_match_all('/\$request->([a-zA-Z0-9_]+)(?!\()/', $methodBody, $m2);
+                        // 4. Sihirli özellikler: $request->email (\b ile kelime kırpılmaları engellendi)
+                        preg_match_all('/\$request->([a-zA-Z0-9_]+)\b(?!\s*\()/', $methodBody, $m2);
                         foreach (($m2[1] ?? []) as $k) {
+                            if (!isset($extractedParams[$k])) $extractedParams[$k] = false;
+                        }
+
+                        // 5. Array kullanımı: $request['email']
+                        preg_match_all('/\$request\s*\[\s*[\'"]([a-zA-Z0-9_\.\-]+)[\'"]\s*\]/', $methodBody, $m3);
+                        foreach (($m3[1] ?? []) as $k) {
                             if (!isset($extractedParams[$k])) $extractedParams[$k] = false;
                         }
                     }
@@ -122,22 +130,19 @@ class ExplorerController extends Controller
                         'all', 'input', 'query', 'boolean', 'date', 'enum', 'string', 'integer',
                         'validate', 'validated', 'safe', 'only', 'except', 'has', 'hasAny',
                         'filled', 'anyFilled', 'missing', 'whenHas', 'whenFilled', 'whenMissing',
-                        'merge', 'mergeIfMissing', 'replace', 'json', 'content', 'route', 'onl'
+                        'merge', 'mergeIfMissing', 'replace', 'json', 'content', 'route'
                     ];
 
                     foreach ($extractedParams as $key => $isRequired) {
                         if (in_array($key, $ignoreList) || empty($key)) {
                             continue;
                         }
-                        // Eğer URL path parametresi değilse ekle
                         if (!in_array($key, array_column($params, 'name'))) {
                             $params[] = ['name' => $key, 'type' => 'Body/Query', 'required' => $isRequired];
                         }
                     }
                 }
-            } catch (Throwable $e) {
-                // Analiz hatası olursa sessizce yoksay
-            }
+            } catch (Throwable $e) {}
 
             return [
                 'uri' => $route->uri(),
