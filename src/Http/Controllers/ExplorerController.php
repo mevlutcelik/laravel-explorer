@@ -4,6 +4,7 @@ namespace Mevlutcelik\LaravelExplorer\Http\Controllers;
 
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Route;
+use ReflectionClass;
 use ReflectionFunction;
 use ReflectionMethod;
 use Throwable;
@@ -24,21 +25,54 @@ class ExplorerController extends Controller
                 $params[] = ['name' => $name, 'type' => 'Path', 'required' => !$isOptional];
             }
 
-            // 2. Closure veya Controller içindeki Request parametrelerini analiz et
+            // 2. Controller, Closure ve FormRequest Analizi
             try {
                 $action = $route->getAction();
                 $reflection = null;
+                $foundKeys = [];
 
                 if (isset($action['uses']) && is_string($action['uses']) && str_contains($action['uses'], '@')) {
                     list($class, $method) = explode('@', $action['uses']);
                     if (class_exists($class) && method_exists($class, $method)) {
-                        $reflection = new \ReflectionMethod($class, $method);
+                        $reflection = new ReflectionMethod($class, $method);
                     }
                 } elseif (isset($action['uses']) && $action['uses'] instanceof \Closure) {
-                    $reflection = new \ReflectionFunction($action['uses']);
+                    $reflection = new ReflectionFunction($action['uses']);
                 }
 
                 if ($reflection) {
+                    
+                    // --- A. FORM REQUEST DOSYALARINI OKU (Örn: LoginRequest) ---
+                    foreach ($reflection->getParameters() as $param) {
+                        $type = $param->getType();
+                        if ($type && !$type->isBuiltin()) {
+                            $typeName = $type->getName();
+                            if (is_subclass_of($typeName, '\Illuminate\Foundation\Http\FormRequest')) {
+                                try {
+                                    $reqRef = new ReflectionClass($typeName);
+                                    if ($reqRef->hasMethod('rules')) {
+                                        $ruleMethod = $reqRef->getMethod('rules');
+                                        $rFile = $ruleMethod->getFileName();
+                                        $rStart = $ruleMethod->getStartLine() - 1;
+                                        $rLen = $ruleMethod->getEndLine() - $rStart;
+                                        
+                                        if ($rFile && is_readable($rFile)) {
+                                            $rSource = file($rFile);
+                                            $rBody = implode("", array_slice($rSource, $rStart, $rLen));
+                                            
+                                            // ['email' => 'required'] yapısındaki anahtarları bul
+                                            preg_match_all('/[\'"]([a-zA-Z0-9_\.]+)[\'"]\s*=>/', $rBody, $rMatches);
+                                            if (!empty($rMatches[1])) {
+                                                $foundKeys = array_merge($foundKeys, $rMatches[1]);
+                                            }
+                                        }
+                                    }
+                                } catch (Throwable $e) {}
+                            }
+                        }
+                    }
+
+                    // --- B. METODUN KENDİ İÇİNİ OKU ---
                     $file = $reflection->getFileName();
                     $startLine = $reflection->getStartLine() - 1;
                     $endLine = $reflection->getEndLine();
@@ -48,19 +82,51 @@ class ExplorerController extends Controller
                         $source = file($file);
                         $methodBody = implode("", array_slice($source, $startLine, $length));
 
-                        preg_match_all('/(?:->input|->get|request\()\s*\(\s*[\'"]([a-zA-Z0-9_]+)[\'"]/', $methodBody, $bodyMatches);
+                        // 1. Normal kullanımlar: ->input('email'), request('email') vs.
+                        preg_match_all('/(?:->input|->get|request\()\s*\(\s*[\'"]([a-zA-Z0-9_]+)[\'"]/', $methodBody, $m1);
                         
-                        $foundKeys = array_unique($bodyMatches[1] ?? []);
-
-                        foreach ($foundKeys as $key) {
-                            if (!in_array($key, array_column($params, 'name'))) {
-                                $params[] = ['name' => $key, 'type' => 'Body/Query', 'required' => false];
+                        // 2. Sihirli özellikler: $request->email (method çağrılarını hariç tut)
+                        preg_match_all('/\$request->([a-zA-Z0-9_]+)(?!\()/', $methodBody, $m2);
+                        
+                        // 3. Doğrudan validate dizileri: 'email' => 'required|string'
+                        preg_match_all('/[\'"]([a-zA-Z0-9_\.]+)[\'"]\s*=>\s*[\'"](?:required|sometimes|nullable|string|integer|email|min|max|boolean|array)/', $methodBody, $m3);
+                        
+                        // 4. ->only(['email', 'password']) dizileri
+                        preg_match_all('/->only\(\s*\[(.*?)\]\s*\)/s', $methodBody, $m4Raw);
+                        $m4 = [];
+                        if (!empty($m4Raw[1])) {
+                            foreach ($m4Raw[1] as $onlyBlock) {
+                                preg_match_all('/[\'"]([a-zA-Z0-9_]+)[\'"]/', $onlyBlock, $onlyKeys);
+                                $m4 = array_merge($m4, $onlyKeys[1] ?? []);
                             }
+                        }
+
+                        $foundKeys = array_merge($foundKeys, $m1[1] ?? [], $m2[1] ?? [], $m3[1] ?? [], $m4);
+                    }
+
+                    // Bulunan parametreleri temizle ve filtrele (Sistem değişkenlerini gizle)
+                    $ignoreList = [
+                        'user', 'ip', 'url', 'fullUrl', 'method', 'path', 'ajax', 'pjax', 
+                        'secure', 'bearerToken', 'cookie', 'header', 'server', 'session',
+                        'all', 'input', 'query', 'boolean', 'date', 'enum', 'string', 'integer',
+                        'validate', 'validated', 'safe', 'only', 'except', 'has', 'hasAny',
+                        'filled', 'anyFilled', 'missing', 'whenHas', 'whenFilled', 'whenMissing',
+                        'merge', 'mergeIfMissing', 'replace', 'json', 'content', 'route'
+                    ];
+
+                    $foundKeys = array_unique(array_filter($foundKeys, function($k) use ($ignoreList) {
+                        return !in_array($k, $ignoreList) && !empty($k);
+                    }));
+
+                    foreach ($foundKeys as $key) {
+                        // Eğer URL path parametresi değilse, Body parametresi olarak ekle
+                        if (!in_array($key, array_column($params, 'name'))) {
+                            $params[] = ['name' => $key, 'type' => 'Body/Query', 'required' => false];
                         }
                     }
                 }
-            } catch (\Throwable $e) {
-                // Sessizce geç
+            } catch (Throwable $e) {
+                // Analiz hatası olursa sessizce yoksay
             }
 
             return [
@@ -72,9 +138,8 @@ class ExplorerController extends Controller
                 'params' => $params
             ];
         })->filter(function ($route) {
-            // Gizlenmesini istediğimiz rotalar
             $ignoreUris = [
-                config('laravel-explorer.path', 'explorer'), // Kendi arayüzümüzü gizle
+                config('laravel-explorer.path', 'explorer'),
                 '_debugbar/{routes}',
                 '_boost/browser-logs',
                 'storage/{path}',
@@ -82,12 +147,10 @@ class ExplorerController extends Controller
                 'sanctum/csrf-cookie',
             ];
 
-            // Birebir eşleşenleri filtrele
             if (in_array($route['uri'], $ignoreUris)) {
                 return false;
             }
 
-            // Alt çizgi ile başlayan sistem/paket rotalarını filtrele (_ignition vb.)
             if (str_starts_with($route['uri'], '_')) {
                 return false;
             }
@@ -95,7 +158,6 @@ class ExplorerController extends Controller
             return true;
         })->sortBy('uri')->values()->all();
 
-        // Paketin view dosyasını çağır
         return view('laravel-explorer::index', ['routes' => $routes]);
     }
 }
