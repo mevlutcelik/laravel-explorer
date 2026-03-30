@@ -2,6 +2,7 @@
     "name": "mevlutcelik/laravel-explorer",
     "description": "An advanced API route explorer and testing workspace for Laravel.",
     "type": "library",
+    "license": "MIT",
     "require": {
         "php": "^8.2",
         "illuminate/support": "^12.0",
