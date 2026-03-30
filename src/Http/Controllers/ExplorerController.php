@@ -17,7 +17,7 @@ class ExplorerController extends Controller
             $middleware = $route->gatherMiddleware();
             $params = [];
 
-            // 1. URL Path Parametrelerini Yakala (Örn: /api/users/{id})
+            // 1. URL Path Parametrelerini Yakala
             preg_match_all('/\{([^}]+)\}/', $route->uri(), $matches);
             foreach ($matches[1] as $match) {
                 $isOptional = str_ends_with($match, '?');
@@ -60,7 +60,6 @@ class ExplorerController extends Controller
                                             $rSource = file($rFile);
                                             $rBody = implode("", array_slice($rSource, $rStart, $rLen));
                                             
-                                            // ['email' => 'required'] yapısındaki anahtarları bul
                                             preg_match_all('/[\'"]([a-zA-Z0-9_\.]+)[\'"]\s*=>/', $rBody, $rMatches);
                                             if (!empty($rMatches[1])) {
                                                 $foundKeys = array_merge($foundKeys, $rMatches[1]);
@@ -82,20 +81,22 @@ class ExplorerController extends Controller
                         $source = file($file);
                         $methodBody = implode("", array_slice($source, $startLine, $length));
 
-                        // 1. Normal kullanımlar: ->input('email'), request('email') vs.
+                        // 1. Normal kullanımlar: ->input('email'), request('email')
                         preg_match_all('/(?:->input|->get|request\()\s*\(\s*[\'"]([a-zA-Z0-9_]+)[\'"]/', $methodBody, $m1);
                         
                         // 2. Sihirli özellikler: $request->email (method çağrılarını hariç tut)
                         preg_match_all('/\$request->([a-zA-Z0-9_]+)(?!\()/', $methodBody, $m2);
                         
-                        // 3. Doğrudan validate dizileri: 'email' => 'required|string'
-                        preg_match_all('/[\'"]([a-zA-Z0-9_\.]+)[\'"]\s*=>\s*[\'"](?:required|sometimes|nullable|string|integer|email|min|max|boolean|array)/', $methodBody, $m3);
+                        // 3. Doğrudan validate dizileri: 'email' => 'required'
+                        preg_match_all('/[\'"]([a-zA-Z0-9_\.]+)[\'"]\s*=>\s*[\'"]/', $methodBody, $m3);
                         
-                        // 4. ->only(['email', 'password']) dizileri
-                        preg_match_all('/->only\(\s*\[(.*?)\]\s*\)/s', $methodBody, $m4Raw);
+                        // 4. ->only('email', 'password') VEYA ->only(['email', 'password'])
+                        // Hem köşeli parantezli hem parantezsiz kullanımları yakalar
+                        preg_match_all('/->(?:only|except)\(\s*(.*?)\s*\)/s', $methodBody, $m4Raw);
                         $m4 = [];
                         if (!empty($m4Raw[1])) {
                             foreach ($m4Raw[1] as $onlyBlock) {
+                                // Bloğun içindeki tüm string (tırnak içi) değerleri al
                                 preg_match_all('/[\'"]([a-zA-Z0-9_]+)[\'"]/', $onlyBlock, $onlyKeys);
                                 $m4 = array_merge($m4, $onlyKeys[1] ?? []);
                             }
@@ -111,7 +112,7 @@ class ExplorerController extends Controller
                         'all', 'input', 'query', 'boolean', 'date', 'enum', 'string', 'integer',
                         'validate', 'validated', 'safe', 'only', 'except', 'has', 'hasAny',
                         'filled', 'anyFilled', 'missing', 'whenHas', 'whenFilled', 'whenMissing',
-                        'merge', 'mergeIfMissing', 'replace', 'json', 'content', 'route'
+                        'merge', 'mergeIfMissing', 'replace', 'json', 'content', 'route', 'onl'
                     ];
 
                     $foundKeys = array_unique(array_filter($foundKeys, function($k) use ($ignoreList) {
@@ -119,15 +120,12 @@ class ExplorerController extends Controller
                     }));
 
                     foreach ($foundKeys as $key) {
-                        // Eğer URL path parametresi değilse, Body parametresi olarak ekle
                         if (!in_array($key, array_column($params, 'name'))) {
                             $params[] = ['name' => $key, 'type' => 'Body/Query', 'required' => false];
                         }
                     }
                 }
-            } catch (Throwable $e) {
-                // Analiz hatası olursa sessizce yoksay
-            }
+            } catch (Throwable $e) {}
 
             return [
                 'uri' => $route->uri(),
