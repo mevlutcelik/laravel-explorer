@@ -285,6 +285,11 @@
                             </div>
                         </div>
 
+                        <div class="mb-3">
+                            <label class="text-[9px] font-bold uppercase tracking-widest text-gray-500 dark:text-zinc-500 mb-1.5 block">Path Parameters</label>
+                            <div id="pathParams" class="space-y-2"></div>
+                        </div>
+
                         <div id="inspectorAuthContainer" class="mb-3 hidden">
                             <label class="text-[9px] font-bold uppercase tracking-widest text-amber-600 dark:text-amber-500 mb-1.5 flex items-center gap-1">
                                 <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
@@ -708,19 +713,28 @@ function openDetail(row) {
     }
     document.getElementById('insMiddleware').innerHTML = state.activeRoute.mw.map(m => `<span class="text-[9px] px-2 py-1 rounded bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300 border border-gray-200 dark:border-zinc-700">${m}</span>`).join('');
 
-    let paramsHtml = ''; let formBuilderHtml = '';
+    let paramsHtml = ''; let formBuilderHtml = ''; let pathBuilderHtml = '';
+    const seenParams = new Set();
     const pathMatch = state.activeRoute.uri.match(/\{([^}]+)\}/g);
     if (pathMatch) {
         pathMatch.forEach(p => {
             const clean = p.replace(/[{}]/g, ''); const isOptional = clean.endsWith('?'); const name = clean.replace('?', '');
+            // mark seen
+            seenParams.add(name);
             paramsHtml += `<div class="flex justify-between items-center bg-gray-50 dark:bg-zinc-800/50 px-2 py-1.5 rounded border border-gray-200 dark:border-white/5"><span class="text-[10px] font-mono text-blue-600 dark:text-blue-400">${name}</span><div class="flex gap-2 items-center"><span class="text-[8px] text-gray-500 border border-gray-300 dark:border-zinc-700 rounded px-1 uppercase">Path</span><span class="text-[8px] font-bold ${isOptional ? 'text-gray-400 dark:text-zinc-500' : 'text-red-500 dark:text-red-400'}">${isOptional ? 'OPTIONAL' : 'REQUIRED'}</span></div></div>`;
+
+            // Build path input in a separate container
+            pathBuilderHtml += `<div class="flex gap-2 path-param-row shrink-0 items-center"><span class="w-2/5 text-[10px] font-mono text-blue-600 dark:text-blue-400">${name}</span><input type="text" placeholder="Path value" data-path-name="${name}" class="flex-1 code-input py-1.5 px-2"></div>`;
         });
     }
 
     try {
         const backendParams = JSON.parse(state.activeRoute.paramsRaw);
         if(Array.isArray(backendParams)) {
-            backendParams.forEach(p => {
+                backendParams.forEach(p => {
+                // skip if already present as a path param
+                if (seenParams.has(p.name)) return;
+                seenParams.add(p.name);
                 paramsHtml += `<div class="flex justify-between items-center bg-gray-50 dark:bg-zinc-800/50 px-2 py-1.5 rounded border border-gray-200 dark:border-white/5"><span class="text-[10px] font-mono text-blue-600 dark:text-blue-400">${p.name}</span><div class="flex gap-2 items-center"><span class="text-[8px] text-gray-500 border border-gray-300 dark:border-zinc-700 rounded px-1 uppercase">${p.type || 'Body/Query'}</span><span class="text-[8px] font-bold ${p.required ? 'text-red-500 dark:text-red-400' : 'text-gray-400 dark:text-zinc-500'}">${p.required ? 'REQUIRED' : 'OPTIONAL'}</span></div></div>`;
                 formBuilderHtml += `<div class="flex gap-2 param-row shrink-0"><input type="text" placeholder="Key" value="${p.name}" class="w-2/5 code-input py-1.5 px-2"><input type="text" placeholder="Value" value="" class="flex-1 code-input py-1.5 px-2"><button onclick="this.parentElement.remove()" class="text-red-500 hover:text-red-600 dark:hover:text-red-400 px-1 transition-colors"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg></button></div>`;
             });
@@ -728,10 +742,20 @@ function openDetail(row) {
     } catch(e) {}
 
     document.getElementById('insParams').innerHTML = paramsHtml || '<div class="text-[10px] text-gray-500 italic">No parameters detected.</div>';
-    
+
+    // Path params go to their own builder
+    const pathBuilder = document.getElementById('pathParams');
+    if (pathBuilderHtml) {
+        pathBuilder.innerHTML = pathBuilderHtml;
+        document.querySelectorAll('#pathParams .path-param-row input[data-path-name]').forEach(i => i.addEventListener('input', generateSnippets));
+    } else {
+        pathBuilder.innerHTML = '<div class="text-[10px] text-gray-500 italic">No path parameters.</div>';
+    }
+
     const formBuilder = document.getElementById('formBuilder');
-    if (formBuilderHtml) formBuilder.innerHTML = formBuilderHtml;
-    else { formBuilder.innerHTML = ''; addParamRow(); }
+    if (formBuilderHtml) {
+        formBuilder.innerHTML = formBuilderHtml;
+    } else { formBuilder.innerHTML = ''; addParamRow(); }
 
     const select = document.getElementById('reqMethod');
     select.innerHTML = state.activeRoute.methods.map(m => `<option value="${m.toUpperCase()}">${m.toUpperCase()}</option>`).join('');
@@ -784,6 +808,15 @@ function getRequestData() {
     return JSON.stringify(obj);
 }
 
+function getPathParams() {
+    const obj = {};
+    document.querySelectorAll('.path-param-row input[data-path-name]').forEach(inp => {
+        const name = inp.getAttribute('data-path-name') || inp.dataset.pathName;
+        obj[name] = inp.value;
+    });
+    return obj;
+}
+
 function formatJson() {
     try {
         const el = document.getElementById('reqBody');
@@ -795,7 +828,13 @@ function clearJson() { document.getElementById('reqBody').value = '{\n\n}'; docu
 
 function generateSnippets() {
     if(!state.activeRoute) return;
-    const url = location.origin + '/' + state.activeRoute.uri.replace(/^\//,'');
+    const urlBase = location.origin + '/' + state.activeRoute.uri.replace(/^\//,'');
+    const pathParams = getPathParams();
+    const url = urlBase.replace(/\{([^}]+)\}/g, (m, p) => {
+        const key = p.replace('?', '');
+        // preserve empty string if not provided
+        return encodeURIComponent(pathParams[key] ?? '');
+    });
     const m = document.getElementById('reqMethod') ? document.getElementById('reqMethod').value : state.activeRoute.methods[0].toUpperCase();
     const csrf = document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '';
     const bearerToken = localStorage.getItem('laravel_explorer_token') || '';
@@ -818,7 +857,12 @@ async function executeRequest() {
     
     const btn = document.getElementById('executeBtn');
     const method = document.getElementById('reqMethod').value;
-    const url = location.origin + '/' + state.activeRoute.uri.replace(/^\//,'');
+    const urlBase = location.origin + '/' + state.activeRoute.uri.replace(/^\//,'');
+    const pathParams = getPathParams();
+    const url = urlBase.replace(/\{([^}]+)\}/g, (m, p) => {
+        const key = p.replace('?', '');
+        return encodeURIComponent(pathParams[key] ?? '');
+    });
     const bodyStr = getRequestData();
     
     btn.disabled = true; btn.innerHTML = `<span class="animate-pulse flex items-center justify-center gap-2"><svg class="w-3 h-3 animate-spin" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-loader-icon lucide-loader"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg> SENDING...</span>`;
