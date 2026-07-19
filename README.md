@@ -4,7 +4,7 @@
 <h1 align="center">Laravel Explorer</h1>
 
 <p align="center">
-  <strong>An advanced, beautiful, and interactive API route explorer and testing workspace for Laravel 12+.</strong><br>
+  <strong>An advanced, beautiful, and interactive API route explorer and testing workspace for Laravel 10+ up to 13.</strong><br>
   Built with Tailwind CSS, it provides a Postman/Insomnia-like experience directly within your Laravel application.
 </p>
 
@@ -35,8 +35,8 @@
 
 ## 📦 Requirements
 
-- **PHP:** `^8.2`
-- **Laravel:** `^12.0`
+- **PHP:** `^8.1`
+- **Laravel:** `^10.0|^11.0|^12.0|^13.0`
 
 ## 🚀 Installation
 
